@@ -1,292 +1,333 @@
-document.addEventListener('DOMContentLoaded', () => {
+const API = "http://localhost:7070/api/budget";
 
-    // === NAVIGATION ===
-    const navButtons = document.querySelectorAll('.nav-btn');
-    const views = document.querySelectorAll('.view');
-    const pageTitle = document.getElementById('page-title');
+let chart = null;
+let pieChart = null;
 
-    navButtons.forEach(btn => {
-        btn.addEventListener('click', () => {
-            const target = btn.getAttribute('data-target');
+/* ================= NAVIGATION ================= */
+document.querySelectorAll(".nav-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
 
-            navButtons.forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
+        document.querySelectorAll(".nav-btn").forEach(b => b.classList.remove("active"));
+        btn.classList.add("active");
 
-            views.forEach(v => v.classList.remove('active'));
-            document.getElementById(target).classList.add('active');
+        const target = btn.getAttribute("data-target");
 
-            pageTitle.textContent = btn.textContent;
+        document.querySelectorAll(".view").forEach(v => v.classList.remove("active"));
+        document.getElementById(target).classList.add("active");
 
-            fetchData();
-        });
-    });
+        document.getElementById("page-title").textContent = btn.textContent;
 
-    // === ADD EXPENSE ===
-    const form = document.getElementById('student-form');
-
-    form.addEventListener('submit', async (e) => {
-        e.preventDefault();
-
-        const expense = {
-            s_no: document.getElementById('s_no').value,
-            category: document.getElementById('category').value,
-            amount: document.getElementById('amount').value,
-            date: document.getElementById('date').value
-        };
-
-        try {
-            const response = await fetch('http://localhost:7070/api/budget', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(expense)
-            });
-
-            if (response.ok) {
-                alert('Expense added ✅');
-                form.reset();
-                fetchData();
-            } else {
-                alert('Error ❌');
-            }
-
-        } catch (err) {
-            alert('Server error ❌');
+        if (target === "dashboard") {
+            loadData();
         }
     });
+});
 
-    let dailyChart;
+/* ================= AUTO ID ================= */
+function generateId(data) {
+    if (data.length === 0) return 1;
+    const maxId = Math.max(...data.map(item => parseInt(item.s_no)));
+    return maxId + 1;
+}
 
-    // === FETCH DATA ===
-    async function fetchData() {
-    try {
-        const response = await fetch('http://localhost:7070/api/budget');
-        const data = await response.json();
+/* ================= LOAD DATA ================= */
+async function loadData() {
 
-        const activeView = document.querySelector('.view.active').id;
+    const res = await fetch(API);
+    const data = await res.json();
 
-        updateDashboard(data);
+    console.log("DATA:", data);
 
-        if (activeView === 'dashboard') {
-            renderDailyChart(data);  // ✅ FIXED
-        }
+    loadTable(data);
+    updateDashboard(data);
+    loadCategories(data);
+    loadChart(data);
+    loadPieChart(data);
+    loadCategoryChart(data);
 
-        if (activeView === 'view-students') {
-            updateTransactionTable(data);
-        } 
-        else if (activeView === 'categories') {
-            updateCategoryTable(data);
-        }
+    const newId = generateId(data);
+    const idInput = document.getElementById("s_no");
+    if (idInput) idInput.value = newId;
+}
 
-    } catch (err) {
-        console.log(err);
+/* ================= ADD ================= */
+document.getElementById("student-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+
+    const obj = {
+        s_no: document.getElementById("s_no").value,
+        category: document.getElementById("category").value,
+        amount: document.getElementById("amount").value,
+        date: document.getElementById("date").value,
+        type: (document.getElementById("type").value || "expense").toLowerCase()
+    };
+
+    await fetch(API, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(obj)
+    });
+
+    alert("Transaction Added!");
+    loadData();
+});
+
+/* ================= TABLE ================= */
+function loadTable(data) {
+
+    const tbody = document.getElementById("student-table-body");
+    tbody.innerHTML = "";
+
+    data.forEach(item => {
+
+        const type = (item.type || "expense").toLowerCase();
+
+        tbody.innerHTML += `
+        <tr>
+            <td>${item.s_no}</td>
+            <td>${item.category}</td>
+            <td>${item.amount}</td>
+            <td>${item.date}</td>
+            <td>${type}</td>
+            <td>
+                <button class="delete-btn" onclick="deleteData('${item.s_no}')">Delete</button>
+            </td>
+        </tr>`;
+    });
+}
+
+/* ================= DELETE ================= */
+async function deleteData(id) {
+    await fetch(`${API}/${id}`, { method: "DELETE" });
+    loadData();
+}
+
+/* ================= UPDATE ================= */
+document.getElementById("update-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+
+    const obj = {
+        s_no: document.getElementById("updateSno").value,
+        category: document.getElementById("updateCategory").value,
+        amount: document.getElementById("updateAmount").value,
+        date: document.getElementById("updateDate").value,
+        type: document.getElementById("updateType").value
+    };
+
+    await fetch(API, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(obj)
+    });
+
+    alert("Updated Successfully!");
+    loadData();
+});
+
+/* ================= DASHBOARD ================= */
+function updateDashboard(data) {
+
+    let total = 0;
+    let income = 0;
+    let expense = 0;
+
+    data.forEach(item => {
+
+        const amt = parseFloat(item.amount) || 0;
+        const type = (item.type || "expense").toLowerCase();
+
+        total += amt;
+
+        if (type === "income") income += amt;
+        else expense += amt;
+    });
+
+    document.getElementById("total-count").textContent = total;
+    document.getElementById("total-income").textContent = income;
+    document.getElementById("total-expense").textContent = expense;
+    document.getElementById("balance").textContent = income - expense;
+}
+
+/* ================= CATEGORY ================= */
+function loadCategories(data) {
+
+    const map = {};
+
+    data.forEach(item => {
+        const cat = item.category;
+        const amt = parseFloat(item.amount) || 0;
+
+        if (!map[cat]) map[cat] = 0;
+        map[cat] += amt;
+    });
+
+    const tbody = document.getElementById("category-table-body");
+    tbody.innerHTML = "";
+
+    let i = 1;
+    for (let key in map) {
+        tbody.innerHTML += `
+        <tr>
+            <td>${i++}</td>
+            <td>${key}</td>
+            <td>${map[key]}</td>
+        </tr>`;
     }
 }
-    // async function fetchData() {
-    //     try {
-    //         const response = await fetch('http://localhost:7070/api/budget');
-    //         const data = await response.json();
 
-    //         updateDashboard(data);
-    //         renderDailyChart(data);
+/* ================= LINE CHART ================= */
+function loadChart(data) {
 
-    //         const activeView = document.querySelector('.view.active').id;
+    const canvas = document.getElementById("dailyChart");
+    if (!canvas) return;
 
-    //         if (activeView === 'view-students') {
-    //             updateTransactionTable(data);
-    //         } 
-    //         else if (activeView === 'categories') {
-    //             updateCategoryTable(data);
-    //         }
+    const map = {};
 
-    //     } catch (err) {
-    //         console.log(err);
-    //     }
-    // }
+    data.forEach(item => {
+        const date = item.date;
+        const amt = parseFloat(item.amount) || 0;
 
-    // === DAILY LINE CHART ===
-    function renderDailyChart(data) {
+        if (!map[date]) map[date] = 0;
+        map[date] += amt;
+    });
 
-        let dateMap = {};
+    const labels = Object.keys(map).sort();
+    const values = labels.map(d => map[d]);
 
-        data.forEach(item => {
-            if (!item.date) return;
+    if (chart) chart.destroy();
 
-            const date = item.date;
-            const amt = parseFloat(item.amount || 0);
-
-            dateMap[date] = (dateMap[date] || 0) + amt;
-        });
-
-        const sortedDates = Object.keys(dateMap).sort();
-
-        const labels = sortedDates;
-        const values = sortedDates.map(d => dateMap[d]);
-
-        if (dailyChart) dailyChart.destroy();
-
-        const ctx = document.getElementById('dailyChart');
-
-        dailyChart = new Chart(ctx, {
-            type: 'line',
-            data: {
-                labels: labels,
-                datasets: [{
-                    label: "Daily Spending",
-                    data: values,
-                    fill: true,
-                    tension: 0.3
-                }]
-            }
-        });
-    }
-
-    // === TRANSACTION TABLE ===
-    function updateTransactionTable(data) {
-        const tableBody = document.getElementById('student-table-body');
-        tableBody.innerHTML = '';
-
-        data.forEach(item => {
-            const row = document.createElement('tr');
-
-            row.innerHTML = `
-                <td>${item.s_no}</td>
-                <td>${item.category}</td>
-                <td>${item.amount}</td>
-                <td>${item.date}</td>
-                <td>
-                    <button onclick="deleteExpense(${item.s_no})" style="color:red;">
-                        Delete
-                    </button>
-                </td>
-            `;
-
-            tableBody.appendChild(row);
-        });
-    }
-
-    // === CATEGORY SUMMARY ===
-    function updateCategoryTable(data) {
-        const tableBody = document.getElementById('category-table-body');
-        tableBody.innerHTML = '';
-
-        const categoryMap = {};
-
-        data.forEach(item => {
-            const cat = item.category.toLowerCase();
-            const amt = parseFloat(item.amount || 0);
-
-            categoryMap[cat] = (categoryMap[cat] || 0) + amt;
-        });
-
-        let i = 1;
-
-        for (let cat in categoryMap) {
-            const row = document.createElement('tr');
-
-            row.innerHTML = `
-                <td>${i++}</td>
-                <td>${cat}</td>
-                <td>${categoryMap[cat]}</td>
-            `;
-
-            tableBody.appendChild(row);
+    chart = new Chart(canvas, {
+        type: "line",
+        data: {
+            labels: labels,
+            datasets: [{
+                label: "Daily Spending",
+                data: values,
+                fill: true,
+                tension: 0.4
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false   // 🔥 smaller chart
         }
-    }
+    });
+}
 
-    // === DELETE ===
-    window.deleteExpense = async function (s_no) {
+/* ================= PIE CHART ================= */
+function loadPieChart(data) {
 
-        if (!confirm("Delete this record?")) return;
+    const canvas = document.getElementById("pieChart");
+    if (!canvas) return;
 
-        try {
-            const response = await fetch(`http://localhost:7070/api/budget/${s_no}`, {
-                method: 'DELETE'
-            });
+    let income = 0;
+    let expense = 0;
 
-            if (response.ok) {
-                alert("Deleted ✅");
-                fetchData();
-            } else {
-                alert("Delete failed ❌");
-            }
+    data.forEach(item => {
+        const amt = parseFloat(item.amount) || 0;
+        const type = (item.type || "expense").toLowerCase();
 
-        } catch (err) {
-            alert("Server error ❌");
+        if (type === "income") income += amt;
+        else expense += amt;
+    });
+
+    if (pieChart) pieChart.destroy();
+
+    pieChart = new Chart(canvas, {
+        type: "pie",
+        data: {
+            labels: ["Income", "Expense"],
+            datasets: [{
+                data: [income, expense],
+                backgroundColor: ["#22c55e", "#ef4444"]
+            }]
         }
-    }
+    });
+}
+let categoryChart = null;
 
-    // === UPDATE FETCH ===
-    document.getElementById('search-btn').addEventListener('click', async () => {
+function loadCategoryChart(data) {
 
-        const s_no = document.getElementById('searchReg').value;
+    const canvas = document.getElementById("categoryChart");
+    if (!canvas) return;
 
-        try {
-            const response = await fetch(`http://localhost:7070/api/budget/${s_no}`);
-            const data = await response.json();
+    const map = {};
 
-            const item = Array.isArray(data) ? data[0] : data;
+    data.forEach(item => {
 
-            if (!item) {
-                alert("Not found ❌");
-                return;
-            }
+        const type = (item.type || "expense").toLowerCase();
 
-            document.getElementById('update-form').style.display = 'block';
+        // ✅ ONLY include EXPENSE
+        if (type === "expense") {
 
-            document.getElementById('updateSno').value = item.s_no;
-            document.getElementById('updateCategory').value = item.category;
-            document.getElementById('updateAmount').value = item.amount;
-            document.getElementById('updateDate').value = item.date;
+            const cat = item.category;
+            const amt = parseFloat(item.amount) || 0;
 
-        } catch (err) {
-            alert("Error ❌");
+            if (!map[cat]) map[cat] = 0;
+            map[cat] += amt;
         }
     });
 
-    // === UPDATE SUBMIT ===
-    document.getElementById('update-form').addEventListener('submit', async (e) => {
-        e.preventDefault();
+    const labels = Object.keys(map);
+    const values = Object.values(map);
 
-        const s_no = document.getElementById('updateSno').value;
+    if (categoryChart) categoryChart.destroy();
 
-        const updatedData = {
-            s_no: s_no,
-            category: document.getElementById('updateCategory').value,
-            amount: document.getElementById('updateAmount').value,
-            date: document.getElementById('updateDate').value
-        };
-
-        try {
-            const response = await fetch(`http://localhost:7070/api/budget/${s_no}`, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(updatedData)
-            });
-
-            if (response.ok) {
-                alert("Updated ✅");
-                fetchData();
-                document.getElementById('update-form').style.display = 'none';
-            } else {
-                alert("Update failed ❌");
-            }
-
-        } catch (err) {
-            alert("Server error ❌");
+    categoryChart = new Chart(canvas, {
+        type: "pie",
+        data: {
+            labels: labels,
+            datasets: [{
+                data: values,
+                backgroundColor: [
+                    "#ef4444", "#f97316", "#eab308",
+                    "#22c55e", "#3b82f6", "#a855f7"
+                ]
+            }]
         }
     });
+}
+async function fetchDataForUpdate() {
 
-    // === DASHBOARD TOTAL ===
-    function updateDashboard(data) {
-        let total = 0;
+    const id = document.getElementById("fetchId").value;
 
-        data.forEach(item => {
-            total += parseFloat(item.amount || 0);
-        });
+    const res = await fetch(API);
+    const data = await res.json();
 
-        document.getElementById('total-count').textContent = total;
+    const item = data.find(d => d.s_no == id);
+
+    if (!item) {
+        alert("Data not found");
+        return;
     }
 
-    // === INITIAL LOAD ===
-    fetchData();
+    // ✅ SET VALUES (NOT PLACEHOLDER)
+    document.getElementById("updateSno").value = item.s_no;
+    document.getElementById("updateCategory").value = item.category;
+    document.getElementById("updateAmount").value = item.amount;
+    document.getElementById("updateDate").value = item.date;
+    document.getElementById("updateType").value = item.type;
+}
+const toggleBtn = document.getElementById("themeToggle");
+
+// Load saved theme
+if (localStorage.getItem("theme") === "dark") {
+    document.body.classList.add("dark");
+    toggleBtn.textContent = "☀️";
+}
+
+toggleBtn.addEventListener("click", () => {
+
+    document.body.classList.toggle("dark");
+
+    if (document.body.classList.contains("dark")) {
+        localStorage.setItem("theme", "dark");
+        toggleBtn.textContent = "☀️";
+    } else {
+        localStorage.setItem("theme", "light");
+        toggleBtn.textContent = "🌙";
+    }
 });
+
+/* ================= INIT ================= */
+loadData();
