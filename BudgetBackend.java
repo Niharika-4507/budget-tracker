@@ -12,36 +12,46 @@ public class BudgetBackend {
     private static final int PORT = 7070;
 
     public static void main(String[] args) throws Exception {
-
         Class.forName("org.sqlite.JDBC");
-
-        // CREATE TABLE
-        try (Connection conn = DriverManager.getConnection(DB_URL);
-             Statement stmt = conn.createStatement()) {
-
-            stmt.execute("CREATE TABLE IF NOT EXISTS Budget (" +
-                    "s_no TEXT PRIMARY KEY," +
-                    "category TEXT," +
-                    "amount TEXT," +
-                    "date TEXT," +
-                    "type TEXT)");
-        }
+        createTable();
 
         HttpServer server = HttpServer.create(new InetSocketAddress(PORT), 0);
 
         server.createContext("/", new StaticHandler());
         server.createContext("/api/budget", new ApiHandler());
+        server.createContext("/api/categories", new ApiHandler());
+        server.createContext("/api/goals", new ApiHandler()); // ✅ IMPORTANT
 
         server.setExecutor(null);
         server.start();
 
-        System.out.println("🚀 Server running at http://localhost:" + PORT);
+        System.out.println("Server running at http://localhost:" + PORT);
     }
 
-    // ================= STATIC FILE HANDLER =================
+    // ================= DATABASE =================
+    private static void createTable() throws Exception {
+        try (Connection conn = DriverManager.getConnection(DB_URL);
+             Statement stmt = conn.createStatement()) {
+
+            stmt.execute("CREATE TABLE IF NOT EXISTS Categories (" +
+                    "category_id INTEGER PRIMARY KEY AUTOINCREMENT," +
+                    "name TEXT, type TEXT)");
+
+            stmt.execute("CREATE TABLE IF NOT EXISTS Transactions (" +
+                    "transaction_id INTEGER PRIMARY KEY AUTOINCREMENT," +
+                    "category_id INTEGER, amount REAL, transaction_date TEXT)");
+
+            stmt.execute("CREATE TABLE IF NOT EXISTS Goals (" +
+                    "goal_id INTEGER PRIMARY KEY AUTOINCREMENT," +
+                    "category_id INTEGER," +
+                    "limit_amount REAL," +
+                    "month TEXT)");
+        }
+    }
+
+    // ================= STATIC =================
     static class StaticHandler implements HttpHandler {
         public void handle(HttpExchange exchange) throws IOException {
-
             String path = exchange.getRequestURI().getPath();
             if (path.equals("/")) path = "/index.html";
 
@@ -49,31 +59,21 @@ public class BudgetBackend {
 
             if (file.exists()) {
                 byte[] content = Files.readAllBytes(file.toPath());
-
-                exchange.getResponseHeaders().set("Content-Type", getType(path));
                 exchange.sendResponseHeaders(200, content.length);
-
-                OutputStream os = exchange.getResponseBody();
-                os.write(content);
-                os.close();
+                exchange.getResponseBody().write(content);
+                exchange.close();
             } else {
                 exchange.sendResponseHeaders(404, -1);
             }
         }
-
-        private String getType(String path) {
-            if (path.endsWith(".html")) return "text/html";
-            if (path.endsWith(".css")) return "text/css";
-            if (path.endsWith(".js")) return "application/javascript";
-            return "text/plain";
-        }
     }
 
-    // ================= API HANDLER =================
+    // ================= API =================
     static class ApiHandler implements HttpHandler {
 
         public void handle(HttpExchange exchange) throws IOException {
 
+            // ✅ CORS
             exchange.getResponseHeaders().add("Access-Control-Allow-Origin", "*");
             exchange.getResponseHeaders().add("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
             exchange.getResponseHeaders().add("Access-Control-Allow-Headers", "Content-Type");
@@ -83,130 +83,229 @@ public class BudgetBackend {
                 return;
             }
 
+            String path = exchange.getRequestURI().getPath();
+            String method = exchange.getRequestMethod();
+
             try {
-                switch (exchange.getRequestMethod()) {
-                    case "GET": handleGet(exchange); break;
-                    case "POST": handlePost(exchange); break;
-                    case "PUT": handlePut(exchange); break;
-                    case "DELETE": handleDelete(exchange); break;
-                    default: exchange.sendResponseHeaders(405, -1);
+
+                // 🔥 VERY IMPORTANT: EXACT MATCH FIX
+                if (path.equals("/api/goals")) {
+    if (method.equals("POST")) handleAddGoal(exchange);
+    else if (method.equals("GET")) handleGetGoals(exchange);
+    else if (method.equals("DELETE")) handleDeleteGoal(exchange);
+    else exchange.sendResponseHeaders(405, -1);
+    return;
+}
+
+                if (path.equals("/api/categories")) {
+                    if (method.equals("POST")) handleAddCategory(exchange);
+                    else if (method.equals("GET")) handleCategories(exchange);
+                    return;
                 }
+
+                if (path.startsWith("/api/budget")) {
+                    switch (method) {
+                        case "GET": handleGet(exchange); break;
+                        case "POST": handlePost(exchange); break;
+                        case "PUT": handlePut(exchange); break;
+                        case "DELETE": handleDelete(exchange); break;
+                    }
+                    return;
+                }
+
+                // ❌ If nothing matched → return 404 properly
+                exchange.sendResponseHeaders(404, -1);
+
             } catch (Exception e) {
                 e.printStackTrace();
                 exchange.sendResponseHeaders(500, -1);
             }
         }
+        private void handleDeleteGoal(HttpExchange exchange) throws Exception {
+    String body = read(exchange);
+    String category_id = get(body, "category_id");
+    String month = get(body, "month");
 
-        // ================= GET =================
-        private void handleGet(HttpExchange exchange) throws Exception {
+    try (Connection conn = DriverManager.getConnection(DB_URL);
+         PreparedStatement ps = conn.prepareStatement(
+             "DELETE FROM Goals WHERE category_id=? AND month=?")) {
 
+        ps.setInt(1, Integer.parseInt(category_id));
+        ps.setString(2, month);
+        ps.executeUpdate();
+    }
+
+    send(exchange, "Goal Deleted");
+}
+
+        // ================= GOALS =================
+        private void handleAddGoal(HttpExchange exchange) throws Exception {
+    String body = read(exchange);
+
+    String category_id = get(body, "category_id");
+    String limit = get(body, "limit");
+    String month = get(body, "month");
+
+    try (Connection conn = DriverManager.getConnection(DB_URL)) {
+
+        // 🔍 Check if goal already exists
+        PreparedStatement check = conn.prepareStatement(
+            "SELECT * FROM Goals WHERE category_id=? AND month=?");
+        check.setInt(1, Integer.parseInt(category_id));
+        check.setString(2, month);
+
+        ResultSet rs = check.executeQuery();
+
+        if (rs.next()) {
+            // 🔄 UPDATE
+            PreparedStatement update = conn.prepareStatement(
+                "UPDATE Goals SET limit_amount=? WHERE category_id=? AND month=?");
+            update.setDouble(1, Double.parseDouble(limit));
+            update.setInt(2, Integer.parseInt(category_id));
+            update.setString(3, month);
+            update.executeUpdate();
+
+            send(exchange, "Goal Updated");
+        } else {
+            // ➕ INSERT
+            PreparedStatement insert = conn.prepareStatement(
+                "INSERT INTO Goals (category_id, limit_amount, month) VALUES (?, ?, ?)");
+            insert.setInt(1, Integer.parseInt(category_id));
+            insert.setDouble(2, Double.parseDouble(limit));
+            insert.setString(3, month);
+            insert.executeUpdate();
+
+            send(exchange, "Goal Added");
+        }
+    }
+}
+
+        private void handleGetGoals(HttpExchange exchange) throws Exception {
             List<String> list = new ArrayList<>();
 
             try (Connection conn = DriverManager.getConnection(DB_URL);
                  Statement stmt = conn.createStatement();
-                 ResultSet rs = stmt.executeQuery("SELECT * FROM Budget")) {
+                 ResultSet rs = stmt.executeQuery("SELECT * FROM Goals")) {
 
                 while (rs.next()) {
-
-                    String type = rs.getString("type");
-
-                    // ✅ SAFETY FIX
-                    if (type == null || type.isEmpty()) {
-                        type = "expense";
-                    }
-
-                    String json = String.format(
-                            "{\"s_no\":\"%s\",\"category\":\"%s\",\"amount\":\"%s\",\"date\":\"%s\",\"type\":\"%s\"}",
-                            rs.getString("s_no"),
-                            rs.getString("category"),
-                            rs.getString("amount"),
-                            rs.getString("date"),
-                            type
-                    );
-
-                    list.add(json);
+                    list.add(String.format(
+                            "{\"category_id\":%d,\"limit\":%.2f,\"month\":\"%s\"}",
+                            rs.getInt("category_id"),
+                            rs.getDouble("limit_amount"),
+                            rs.getString("month")));
                 }
             }
 
-            String response = "[" + String.join(",", list) + "]";
-            sendJSON(exchange, response);
+            sendJSON(exchange, "[" + String.join(",", list) + "]");
         }
 
-        // ================= POST (ADD) =================
-        private void handlePost(HttpExchange exchange) throws Exception {
-
+        // ================= CATEGORIES =================
+        private void handleAddCategory(HttpExchange exchange) throws Exception {
             String body = read(exchange);
-
-            String s_no = get(body, "s_no");
-            String category = get(body, "category");
-            String amount = get(body, "amount");
-            String date = get(body, "date");
+            String name = get(body, "name");
             String type = get(body, "type");
-
-            // ✅ FIX: DEFAULT TYPE
-            if (type == null || type.isEmpty()) {
-                type = "expense";
-            }
 
             try (Connection conn = DriverManager.getConnection(DB_URL);
                  PreparedStatement ps = conn.prepareStatement(
-                         "INSERT INTO Budget VALUES (?, ?, ?, ?, ?)")) {
+                         "INSERT INTO Categories (name, type) VALUES (?, ?)")) {
 
-                ps.setString(1, s_no);
-                ps.setString(2, category);
-                ps.setString(3, amount);
-                ps.setString(4, date);
-                ps.setString(5, type.toLowerCase()); // 🔥 IMPORTANT
+                ps.setString(1, name);
+                ps.setString(2, type);
+                ps.executeUpdate();
+            }
 
+            send(exchange, "Category Added");
+        }
+
+        private void handleCategories(HttpExchange exchange) throws Exception {
+            List<String> list = new ArrayList<>();
+
+            try (Connection conn = DriverManager.getConnection(DB_URL);
+                 Statement stmt = conn.createStatement();
+                 ResultSet rs = stmt.executeQuery("SELECT * FROM Categories")) {
+
+                while (rs.next()) {
+                    list.add(String.format(
+                            "{\"category_id\":%d,\"name\":\"%s\",\"type\":\"%s\"}",
+                            rs.getInt("category_id"),
+                            rs.getString("name"),
+                            rs.getString("type")));
+                }
+            }
+
+            sendJSON(exchange, "[" + String.join(",", list) + "]");
+        }
+
+        // ================= TRANSACTIONS =================
+        private void handleGet(HttpExchange exchange) throws Exception {
+            List<String> list = new ArrayList<>();
+
+            try (Connection conn = DriverManager.getConnection(DB_URL);
+                 Statement stmt = conn.createStatement();
+                 ResultSet rs = stmt.executeQuery("SELECT * FROM Transactions")) {
+
+                while (rs.next()) {
+                    list.add(String.format(
+                            "{\"s_no\":%d,\"category_id\":%d,\"amount\":%.2f,\"date\":\"%s\"}",
+                            rs.getInt("transaction_id"),
+                            rs.getInt("category_id"),
+                            rs.getDouble("amount"),
+                            rs.getString("transaction_date")));
+                }
+            }
+
+            sendJSON(exchange, "[" + String.join(",", list) + "]");
+        }
+
+        private void handlePost(HttpExchange exchange) throws Exception {
+            String body = read(exchange);
+            String category_id = get(body, "category_id");
+            String amount = get(body, "amount");
+            String date = get(body, "date");
+
+            try (Connection conn = DriverManager.getConnection(DB_URL);
+                 PreparedStatement ps = conn.prepareStatement(
+                         "INSERT INTO Transactions (category_id, amount, transaction_date) VALUES (?, ?, ?)")) {
+
+                ps.setInt(1, Integer.parseInt(category_id));
+                ps.setDouble(2, Double.parseDouble(amount));
+                ps.setString(3, date);
                 ps.executeUpdate();
             }
 
             send(exchange, "Added");
         }
 
-        // ================= PUT (UPDATE) =================
         private void handlePut(HttpExchange exchange) throws Exception {
-
             String body = read(exchange);
-
-            String s_no = get(body, "s_no");
-            String category = get(body, "category");
+            String id = get(body, "s_no");
+            String category_id = get(body, "category_id");
             String amount = get(body, "amount");
             String date = get(body, "date");
-            String type = get(body, "type");
-
-            // ✅ FIX
-            if (type == null || type.isEmpty()) {
-                type = "expense";
-            }
 
             try (Connection conn = DriverManager.getConnection(DB_URL);
                  PreparedStatement ps = conn.prepareStatement(
-                         "UPDATE Budget SET category=?, amount=?, date=?, type=? WHERE s_no=?")) {
+                         "UPDATE Transactions SET category_id=?, amount=?, transaction_date=? WHERE transaction_id=?")) {
 
-                ps.setString(1, category);
-                ps.setString(2, amount);
+                ps.setInt(1, Integer.parseInt(category_id));
+                ps.setDouble(2, Double.parseDouble(amount));
                 ps.setString(3, date);
-                ps.setString(4, type.toLowerCase()); // 🔥 IMPORTANT
-                ps.setString(5, s_no);
-
+                ps.setInt(4, Integer.parseInt(id));
                 ps.executeUpdate();
             }
 
             send(exchange, "Updated");
         }
 
-        // ================= DELETE =================
         private void handleDelete(HttpExchange exchange) throws Exception {
-
             String path = exchange.getRequestURI().getPath();
-            String s_no = path.split("/")[3];
+            String id = path.substring(path.lastIndexOf("/") + 1);
 
             try (Connection conn = DriverManager.getConnection(DB_URL);
                  PreparedStatement ps = conn.prepareStatement(
-                         "DELETE FROM Budget WHERE s_no=?")) {
+                         "DELETE FROM Transactions WHERE transaction_id=?")) {
 
-                ps.setString(1, s_no);
+                ps.setInt(1, Integer.parseInt(id));
                 ps.executeUpdate();
             }
 
@@ -220,24 +319,24 @@ public class BudgetBackend {
         }
 
         private void send(HttpExchange ex, String msg) throws IOException {
-            ex.sendResponseHeaders(200, msg.length());
-            OutputStream os = ex.getResponseBody();
-            os.write(msg.getBytes());
-            os.close();
+            byte[] bytes = msg.getBytes();
+            ex.sendResponseHeaders(200, bytes.length);
+            ex.getResponseBody().write(bytes);
+            ex.close();
         }
 
         private void sendJSON(HttpExchange ex, String json) throws IOException {
+            byte[] bytes = json.getBytes();
             ex.getResponseHeaders().set("Content-Type", "application/json");
-            ex.sendResponseHeaders(200, json.length());
-            OutputStream os = ex.getResponseBody();
-            os.write(json.getBytes());
-            os.close();
+            ex.sendResponseHeaders(200, bytes.length);
+            ex.getResponseBody().write(bytes);
+            ex.close();
         }
 
         private String get(String json, String key) {
-            String pattern = "\"" + key + "\":\"([^\"]*)\"";
-            java.util.regex.Matcher m =
-                    java.util.regex.Pattern.compile(pattern).matcher(json);
+            java.util.regex.Matcher m = java.util.regex.Pattern
+                    .compile("\"" + key + "\"\\s*:\\s*\"?([^\",}]*)\"?")
+                    .matcher(json);
             return m.find() ? m.group(1) : "";
         }
     }
