@@ -1,167 +1,169 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Budget Tracking</title>
-
-<link rel="stylesheet" href="style.css">
-<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600&display=swap" rel="stylesheet">
-
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Budget Tracking</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        .msg {
+            display: none;
+            margin-top: 0.6rem;
+            padding: 0.5rem 1rem;
+            border-radius: 8px;
+            background: #dcfce7;
+            color: #166534;
+            font-size: 0.9rem;
+        }
+        /* Style for the active goals list */
+        .goal-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 1rem;
+            border-bottom: 1px solid var(--border);
+            align-items: center;
+        }
+    </style>
 </head>
-
 <body>
 <div class="container">
 
-<!-- SIDEBAR -->
-<aside class="sidebar">
-    <h2>Budget<span>Tracking</span></h2>
+    <aside class="sidebar">
+        <h2>Budget<span>Tracking</span></h2>
+        <button class="nav-btn active" data-target="dashboard">Dashboard</button>
+        <button class="nav-btn" data-target="add">Add Transaction</button>
+        <button class="nav-btn" data-target="update">Update Transaction</button>
+        <button class="nav-btn" data-target="categories">Categories</button>
+        <button class="nav-btn" data-target="budget-goals">🎯 Budget Goals</button>
+        <button class="nav-btn" data-target="history">Transaction History</button>
+    </aside>
 
-    <button class="nav-btn active" data-target="dashboard">Dashboard</button>
-    <button class="nav-btn" data-target="add-student">Add Transaction</button>
-    <button class="nav-btn" data-target="update-student">Update Transaction</button>
-    <button class="nav-btn" data-target="categories">Categories</button>
-    <button class="nav-btn" data-target="view-students">Transaction History</button>
-</aside>
+    <main class="content">
+        <header>
+            <h1 id="page-title">Dashboard</h1>
+        </header>
 
-<!-- MAIN -->
-<main class="content">
+        <section id="dashboard" class="view active">
+            <div class="stats-grid">
+                <div class="stat-card purple"><h3>Total</h3><p id="total-count">0</p></div>
+                <div class="stat-card green"><h3>Income</h3><p id="total-income">0</p></div>
+                <div class="stat-card red"><h3>Expense</h3><p id="total-expense">0</p></div>
+                <div class="stat-card blue"><h3>Balance</h3><p id="balance">0</p></div>
+            </div>
 
-<header>
-    <h1 id="page-title">Dashboard</h1>
-    <div>
-        <span>Admin</span>
-        <button id="themeToggle" class="theme-btn">🌙</button>
-    </div>
-</header>
+            <div class="charts-container">
+                <div class="card chart-card">
+                    <h2>Income vs Expense</h2>
+                    <canvas id="ratioChart"></canvas>
+                </div>
+                <div class="card chart-card">
+                    <h2>Expense Breakdown</h2>
+                    <canvas id="categoryChart"></canvas>
+                </div>
+            </div>
+            
+            <div class="card">
+                <h2>Daily Spending</h2>
+                <canvas id="dailyChart"></canvas>
+            </div>
+        </section>
 
-<!-- DASHBOARD -->
-<section id="dashboard" class="view active">
+        <section id="add" class="view">
+            <div class="card">
+                <h2>Add Transaction</h2>
+                <form id="student-form">
+                    <div class="form-grid">
+                        <input type="text" id="category" placeholder="Enter category name"
+                               list="category-suggestions" autocomplete="off">
+                        <datalist id="category-suggestions"></datalist>
+                        <input type="number" id="amount" placeholder="Amount">
+                        <input type="date" id="date">
+                    </div>
+                    <button type="submit" class="submit-btn">Save</button>
+                    <div id="add-msg" class="msg"></div>
+                </form>
+            </div>
+        </section>
 
-<div class="stats-grid">
-    <div class="stat-card purple"><h3>Total</h3><p id="total-count">0</p></div>
-    <div class="stat-card green"><h3>Income</h3><p id="total-income">0</p></div>
-    <div class="stat-card red"><h3>Expense</h3><p id="total-expense">0</p></div>
-    <div class="stat-card blue"><h3>Balance</h3><p id="balance">0</p></div>
+        <section id="update" class="view">
+            <div class="card">
+                <h2>Update Transaction</h2>
+                <input id="fetchId" placeholder="Enter ID">
+                <button onclick="fetchDataForUpdate()" class="submit-btn" style="width: auto; padding: 0.5rem 1rem;">Fetch</button>
+                <form id="update-form" style="margin-top: 1rem;">
+                    <input type="hidden" id="updateSno">
+                    <div class="form-grid">
+                        <input type="text" id="updateCategory" placeholder="Enter category name"
+                               list="update-category-suggestions" autocomplete="off">
+                        <datalist id="update-category-suggestions"></datalist>
+                        <input id="updateAmount" placeholder="Amount" type="number">
+                        <input type="date" id="updateDate">
+                    </div>
+                    <button type="submit" class="submit-btn" style="margin-top:0.5rem">Update</button>
+                    <div id="update-msg" class="msg"></div>
+                </form>
+            </div>
+        </section>
+
+        <section id="categories" class="view">
+            <div class="card">
+                <h2>Add Category</h2>
+                <div class="form-grid">
+                    <input id="newCategory" placeholder="Category Name">
+                    <select id="categoryType">
+                        <option value="expense">Expense</option>
+                        <option value="income">Income</option>
+                    </select>
+                </div>
+                <button onclick="addCategory()" class="submit-btn">Add Category</button>
+                <div id="category-msg" class="msg"></div>
+                <div class="table-wrapper" style="margin-top: 1.5rem;">
+                    <table>
+                        <thead><tr><th>No</th><th>Category</th><th>Type</th></tr></thead>
+                        <tbody id="category-table-body"></tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <section id="budget-goals" class="view">
+            <div class="card">
+                <h2>Set Monthly Limits</h2>
+                <p style="color: var(--text-muted); margin-bottom: 1.5rem;">Define how much you want to spend per category each month.</p>
+                <form id="goal-form">
+                    <div class="form-grid">
+                        <input type="text" id="goal-category" placeholder="Category Name" list="goal-category-suggestions" autocomplete="off">
+                        <datalist id="goal-category-suggestions"></datalist>
+                        <input type="number" id="goal-limit" placeholder="Limit Amount">
+                        <input type="month" id="goal-month">
+                    </div>
+                    <button type="submit" class="submit-btn">Set Goal</button>
+                </form>
+            </div>
+
+            <div class="card" style="margin-top: 1.5rem;">
+                <h2>Active Goals</h2>
+                <div id="active-goals-list">
+                    </div>
+            </div>
+        </section>
+
+        <section id="history" class="view">
+            <div class="card">
+                <div class="table-wrapper">
+                    <table>
+                        <thead>
+                            <tr><th>ID</th><th>Category</th><th>Amount</th><th>Date</th><th>Action</th></tr>
+                        </thead>
+                        <tbody id="student-table-body"></tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+    </main>
 </div>
-
-<!-- LINE CHART -->
-<div class="card chart-card small-chart">
-    <h2>Daily Spending Trend</h2>
-    <canvas id="dailyChart"></canvas>
-</div>
-
-<!-- PIE CHART -->
-<div class="card chart-row">
-
-    <!-- Income vs Expense -->
-    <div class="chart-box">
-        <h3>Income vs Expense</h3>
-        <canvas id="pieChart"></canvas>
-    </div>
-
-    <!-- Category Chart -->
-    <div class="chart-box">
-        <h3>Category Distribution</h3>
-        <canvas id="categoryChart"></canvas>
-    </div>
-
-</div>
-
-
-</section>
-
-<!-- ADD -->
-<section id="add-student" class="view">
-<div class="card">
-<h2>Add Transaction</h2>
-
-<form id="student-form">
-<div class="form-grid">
-
-<input type="text" id="s_no" readonly>
-<input type="text" id="category" placeholder="Category">
-<input type="number" id="amount" placeholder="Amount">
-<input type="date" id="date">
-
-<select id="type">
-<option value="expense">Expense</option>
-<option value="income">Income</option>
-</select>
-
-</div>
-<button class="submit-btn">Save</button>
-</form>
-
-</div>
-</section>
-
-<!-- UPDATE -->
-<section id="update-student" class="view">
-<div class="card">
-
-<h2>Update Transaction</h2>
-
-<!-- FETCH -->
-<div class="form-grid">
-    <input type="text" id="fetchId" placeholder="Enter ID">
-    <button type="button" onclick="fetchDataForUpdate()">Fetch</button>
-</div>
-
-<!-- UPDATE FORM -->
-<form id="update-form">
-
-    <input type="hidden" id="updateSno">
-
-    <div class="form-grid">
-
-        <input id="updateCategory" placeholder="Category">
-        <input id="updateAmount" placeholder="Amount">
-
-        <input type="date" id="updateDate">
-
-        <select id="updateType">
-            <option value="expense">Expense</option>
-            <option value="income">Income</option>
-        </select>
-
-    </div>
-
-    <button class="submit-btn" type="submit">Update</button>
-
-</form>
-
-</div>
-</section>
-
-<!-- CATEGORY -->
-<section id="categories" class="view">
-<div class="card">
-<table>
-<thead><tr><th>No</th><th>Category</th><th>Total</th></tr></thead>
-<tbody id="category-table-body"></tbody>
-</table>
-</div>
-</section>
-
-<!-- HISTORY -->
-<section id="view-students" class="view">
-<div class="card">
-<table>
-<thead>
-<tr>
-<th>ID</th><th>Category</th><th>Amount</th><th>Date</th><th>Type</th><th>Action</th>
-</tr>
-</thead>
-<tbody id="student-table-body"></tbody>
-</table>
-</div>
-</section>
-
-</main>
-</div>
-
 <script src="script1.js"></script>
 </body>
 </html>
